@@ -1,0 +1,2 @@
+athlete_id,race_id,name,gender,height_cm,date_of_birth,race_date,final_time_sec,pb_50m_seconds,l1_reaction_time,l1_breakout_distance,l1_breakout_time,l1_stroke_count,l1_total_time,l2_breakout_distance,l2_breakout_time,l2_stroke_count,l2_total_time,l1_split_25m,l2_split_25m
+U001,U001-R01,Daniel Siahaan,male,168,2004-07-27,2021-09-02,57.53,26.5,0.67,12,4.6,37,27.81,6.5,2.7,45,29.72,12.3,14.2
