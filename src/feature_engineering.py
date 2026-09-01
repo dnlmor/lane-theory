@@ -93,6 +93,7 @@ def compute_quarter_split_features(df: pd.DataFrame) -> pd.DataFrame:
     df["l1_first25_speed"] = QUARTER_DISTANCE / l1_first25_time
     df["l1_second25_speed"] = QUARTER_DISTANCE / l1_second25_time
     df["intra_lap1_fade"] = df["l1_first25_speed"] - df["l1_second25_speed"]
+    df["intra_lap1_fade_ratio"] = df["l1_second25_speed"] / df["l1_first25_speed"]
 
     # Lap 2: split_25m is lap-relative (time from L2 wall push-off to 75m mark)
     l2_first25_time = df["l2_split_25m"]
@@ -100,6 +101,7 @@ def compute_quarter_split_features(df: pd.DataFrame) -> pd.DataFrame:
     df["l2_first25_speed"] = QUARTER_DISTANCE / l2_first25_time
     df["l2_second25_speed"] = QUARTER_DISTANCE / l2_second25_time
     df["intra_lap2_fade"] = df["l2_first25_speed"] - df["l2_second25_speed"]
+    df["intra_lap2_fade_ratio"] = df["l2_second25_speed"] / df["l2_first25_speed"]
 
     # Freshest segment (L1 first 25) vs most fatigued segment (L2 last 25)
     df["finish_vs_fresh_ratio"] = df["l2_second25_speed"] / df["l1_first25_speed"]
