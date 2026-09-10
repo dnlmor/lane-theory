@@ -11,7 +11,7 @@ import os
 import re
 import joblib
 import pickle
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import numpy as np
@@ -94,7 +94,7 @@ VERDICT_EXPLAIN = {
 
 SEVERITY_RANK = {"Critical Gap": 0, "Gap": 1, "On-par": 2}
 
-# ---------- Loaders ----------
+# ---------- Loaders & Helpers ----------
 
 @st.cache_resource
 def load_models():
@@ -130,6 +130,20 @@ def get_next_race_id(athlete_id, existing_df):
 def render_html(html):
     flat = re.sub(r"\n\s*", "", html)
     st.markdown(flat, unsafe_allow_html=True)
+
+def calculate_age(dob_val, race_date_val):
+    if isinstance(dob_val, str):
+        dob_dt = datetime.strptime(dob_val, "%Y-%m-%d").date()
+    else:
+        dob_dt = dob_val
+        
+    if isinstance(race_date_val, str):
+        race_dt = datetime.strptime(race_date_val, "%Y-%m-%d").date()
+    else:
+        race_dt = race_date_val
+
+    age = race_dt.year - dob_dt.year - ((race_dt.month, race_dt.day) < (dob_dt.month, dob_dt.day))
+    return age
 
 # ---------- Calculations & Formatting ----------
 
@@ -212,7 +226,7 @@ html, body, [class*="css"] {
     visibility: hidden;
 }
 
-/* Compact Console Wrapper to stop wide stretching */
+/* Compact Console Wrapper */
 .console-container {
     max-width: 820px;
     margin: 0 auto;
@@ -443,7 +457,7 @@ html, body, [class*="css"] {
     border-bottom: none;
 }
 
-/* Tight Streamlit Component Inputs */
+/* Input Overrides */
 div[data-baseweb="input"] {
     background-color: #030712 !important;
     border-color: #374151 !important;
@@ -519,7 +533,6 @@ st.caption("High-Performance Swimming Diagnostic Engine — Powered by Relative 
 tab_new, tab_existing = st.tabs(["📝 Race Input Console", "📂 Saved Race Records"])
 
 with tab_new:
-    # Centered compact wrapper for clean laptop view
     st.markdown('<div class="console-container">', unsafe_allow_html=True)
 
     st.markdown('<div class="form-card"><div class="form-header">1. Swimmer Details</div>', unsafe_allow_html=True)
@@ -627,14 +640,16 @@ if "diagnosis_row" in st.session_state:
                                               e["elite_max"], e["elite_mean"], e["verdict"], sub)
 
     stroke_eff = compute_stroke_efficiency(row, elite_features, pillar_report)
+    swimmer_age = calculate_age(row["date_of_birth"], row["race_date"])
 
-    # 1. Full-Width Responsive Hero Banner
+    # 1. Full-Width Hero Banner with Computed Age
     render_html(f'''
     <div class="dash-hero">
         <div class="hero-main">
             <div class="hero-title-text">{row['name']}</div>
             <div class="hero-tag-group">
                 <span class="hero-badge">👤 {gender.capitalize()}</span>
+                <span class="hero-badge">🎂 {swimmer_age} yrs</span>
                 <span class="hero-badge">📏 {row['height_cm']:.0f} cm</span>
                 <span class="hero-badge">🏊 100m Freestyle LCM</span>
             </div>
@@ -658,7 +673,6 @@ if "diagnosis_row" in st.session_state:
     main_col, side_col = st.columns([1.8, 1])
 
     with main_col:
-        # Chart: Speed Profile Across Quarters
         render_html('<div class="tile-card"><div class="tile-title">📈 Race Velocity Profile (m/s)</div>')
         plt.style.use("dark_background")
         fig, ax = plt.subplots(figsize=(6, 2.2), dpi=150)
