@@ -167,11 +167,11 @@ SciPy (`differential_evolution`), Matplotlib/Seaborn, Streamlit
 - [x] Gender-separated benchmark modeling + SHAP
 - [x] 6-Pillar individual diagnosis
 - [x] Physics-based gap simulation (avoiding RF extrapolation)
-- [ ] Generalized dispatcher (auto-select simulator based on flagged gap)
-- [ ] Streamlit dashboard
+- [x] Generalized dispatcher (auto-select simulator based on flagged gap)
+- [x] Streamlit dashboard
 - [ ] 200m Freestyle extension (v1.1)
 
 ## Author
 
-Built by Daniel Siahaan (Haaniel) — MSc AI for Marketing Strategy student,
-former competitive swimmer, as a portfolio project.
+Built by Daniel Siahaan — MSc AI for Marketing Strategy student,
+former competitive swimmer
