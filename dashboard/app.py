@@ -160,6 +160,19 @@ def render_html(html):
     st.markdown(flat, unsafe_allow_html=True)
 
 
+def format_race_time(seconds):
+    """Show race-scale times the way swimmers/coaches actually read them:
+    plain seconds under a minute (e.g. '57.53s'), mm:ss.xx at or above a
+    minute (e.g. '1:02.43') — since 100m times commonly cross 60s for
+    non-elite swimmers, and '62.43' isn't intuitive to read at a glance."""
+    total_cs = round(seconds * 100)
+    m, rem = divmod(total_cs, 6000)
+    s = rem / 100
+    if m > 0:
+        return f"{m:02d}:{s:05.2f}"
+    return f"{s:.2f}s"
+
+
 # ---------- Severity, 5-tier refinement, readable formatting ----------
 
 def compute_severity(metric, value, elite_min, elite_max, elite_mean, verdict, sub):
@@ -381,9 +394,12 @@ with tab_new:
 
     with st.container(border=True):
         st.markdown("**⏱️ Race Result**")
-        col4, col5 = st.columns(2)
-        final_time_sec = col4.number_input("Final time (s)", min_value=40.0, max_value=180.0, value=57.53, key="in_final")
-        l1_reaction_time = col5.number_input("Reaction time (s)", min_value=0.3, max_value=1.5, value=0.67, key="in_rt")
+        col4a, col4b, col4c = st.columns(3)
+        final_min = col4a.number_input("Final time — minutes", min_value=0, max_value=9, value=0, step=1, key="in_final_min")
+        final_sec = col4b.number_input("Final time — seconds", min_value=0.0, max_value=59.99, value=57.53, step=0.01, key="in_final_sec")
+        l1_reaction_time = col4c.number_input("Reaction time (s)", min_value=0.3, max_value=1.5, value=0.67, key="in_rt")
+        final_time_sec = final_min * 60 + final_sec
+        render_html(f'<div class="calc-box">Final time: <b>{format_race_time(final_time_sec)}</b></div>')
 
     with st.container(border=True):
         st.markdown("**1️⃣ Lap 1 (0–50m)**")
@@ -441,7 +457,7 @@ with tab_existing:
         df = individuals_raw.copy()
         df["occurrence"] = (df.groupby("name").cumcount() + 1).astype(int)
         df["display_label"] = df.apply(
-            lambda r: f"{r['name']} ({r['final_time_sec']:.2f}s) #{int(r['occurrence'])}", axis=1
+            lambda r: f"{r['name']} ({format_race_time(r['final_time_sec'])}) #{int(r['occurrence'])}", axis=1
         )
         label_to_race_id = dict(zip(df["display_label"], df["race_id"]))
 
@@ -509,7 +525,7 @@ if "diagnosis_row" in st.session_state:
             </div>
             <div class="time-box">
                 <div class="time-label">Actual Final Time</div>
-                <div class="time-num">{row['final_time_sec']:.2f}s</div>
+                <div class="time-num">{format_race_time(row['final_time_sec'])}</div>
             </div>
         </div>
     </div>
@@ -593,8 +609,8 @@ if "diagnosis_row" in st.session_state:
                 Closing the <b>{gap_label}</b> gap to a realistic point within the optimal range —
                 not the very best in the sample, just solidly inside it — projects to:
             </div>
-            <div class="opportunity-range">{near:.2f}s – {far:.2f}s</div>
-            <div style="font-size:11.5px; color:#64748b;">vs. your actual {sim['actual_time']:.2f}s.
+            <div class="opportunity-range">{format_race_time(near)} – {format_race_time(far)}</div>
+            <div style="font-size:11.5px; color:#64748b;">vs. your actual {format_race_time(sim['actual_time'])}.
                 A physics-based simulation, not a guarantee.{extra_line}</div>
         </div>
         ''')
@@ -625,3 +641,4 @@ if "diagnosis_row" in st.session_state:
 
 else:
     st.info("Enter a new race or load a saved one above to see your diagnostic report.")
+    
