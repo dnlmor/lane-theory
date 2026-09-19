@@ -634,11 +634,10 @@ if "diagnosis_row" in st.session_state:
         <div class="opportunity-card">
             <div class="bottom-title">🎯 Primary Time-Drop Opportunity</div>
             <div style="font-size:13.5px; color:#cbd5e1; line-height:1.6;">
-                Closing the <b>{gap_label}</b> gap to a realistic point within the optimal range —
-                not the very best in the sample, just solidly inside it — projects to:
+                Prediction given if swimmer fixes their gap to a realistic point within the optimal range:
             </div>
             <div class="opportunity-range">{format_race_time(near)} – {format_race_time(far)}</div>
-            <div style="font-size:11.5px; color:#64748b;">vs. your actual {format_race_time(sim['actual_time'])}.
+            <div style="font-size:11.5px; color:#64748b;">against your actual {format_race_time(sim['actual_time'])}.
                 A physics-based simulation, not a guarantee.{extra_line}</div>
         </div>
         ''')
