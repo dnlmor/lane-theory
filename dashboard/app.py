@@ -173,6 +173,24 @@ def format_race_time(seconds):
     return f"{s:.2f}s"
 
 
+def parse_time_input(text):
+    """Accept a time typed either as plain seconds ('57.53') or as
+    mm:ss.xx ('1:02.43') — mirrors format_race_time so what a swimmer
+    types matches what they'll see displayed back. Returns None (rather
+    than raising) on anything unparseable, so the caller can show a
+    friendly error instead of crashing."""
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        if ":" in text:
+            mm, ss = text.split(":", 1)
+            return int(mm) * 60 + float(ss)
+        return float(text)
+    except ValueError:
+        return None
+
+
 # ---------- Severity, 5-tier refinement, readable formatting ----------
 
 def compute_severity(metric, value, elite_min, elite_max, elite_mean, verdict, sub):
@@ -394,12 +412,14 @@ with tab_new:
 
     with st.container(border=True):
         st.markdown("**⏱️ Race Result**")
-        col4a, col4b, col4c = st.columns(3)
-        final_min = col4a.number_input("Final time — minutes", min_value=0, max_value=9, value=0, step=1, key="in_final_min")
-        final_sec = col4b.number_input("Final time — seconds", min_value=0.0, max_value=59.99, value=57.53, step=0.01, key="in_final_sec")
-        l1_reaction_time = col4c.number_input("Reaction time (s)", min_value=0.3, max_value=1.5, value=0.67, key="in_rt")
-        final_time_sec = final_min * 60 + final_sec
-        render_html(f'<div class="calc-box">Final time: <b>{format_race_time(final_time_sec)}</b></div>')
+        col4a, col4b = st.columns(2)
+        final_time_text = col4a.text_input("Final time (e.g. 57.53 or 1:02.43)", value="57.53", key="in_final_text")
+        l1_reaction_time = col4b.number_input("Reaction time (s)", min_value=0.3, max_value=1.5, value=0.67, key="in_rt")
+        final_time_sec = parse_time_input(final_time_text)
+        if final_time_sec is None:
+            st.error("Enter a valid time, like 57.53 or 1:02.43.")
+        else:
+            render_html(f'<div class="calc-box">Final time: <b>{format_race_time(final_time_sec)}</b></div>')
 
     with st.container(border=True):
         st.markdown("**1️⃣ Lap 1 (0–50m)**")
@@ -419,16 +439,24 @@ with tab_new:
         l2_stroke_count = st.number_input("Stroke count", 1, 60, 45, key="l2sc")
         l2_split_25m = st.number_input("Time @ 75m mark (lap-relative, s)", 8.0, 40.0, 14.2, key="l2s25")
 
-        l2_total_time = final_time_sec - l1_total_time
-        if l2_total_time <= 0:
-            st.warning("Lap 1 total time can't be greater than or equal to the final time — check those two values.")
+        if final_time_sec is None:
+            l2_total_time = None
+            st.warning("Enter a valid final time above to calculate Lap 2 total time.")
         else:
-            render_html(f'<div class="calc-box">Lap 2 total time (auto-calculated: final time − Lap 1 time): '
-                        f'<b>{l2_total_time:.2f}s</b></div>')
+            l2_total_time = final_time_sec - l1_total_time
+            if l2_total_time <= 0:
+                st.warning("Lap 1 total time can't be greater than or equal to the final time — check those two values.")
+            else:
+                render_html(f'<div class="calc-box">Lap 2 total time (auto-calculated: final time − Lap 1 time): '
+                            f'<b>{format_race_time(l2_total_time)}</b></div>')
 
     run_new = st.button("🏁 Run Diagnosis", key="run_new", width="stretch")
 
-    if run_new:
+    if run_new and final_time_sec is None:
+        st.error("Fix the final time field above before running the diagnosis.")
+    elif run_new and (l2_total_time is None or l2_total_time <= 0):
+        st.error("Lap 1 and final time don't add up — fix those before running the diagnosis.")
+    elif run_new:
         athlete_id = get_next_athlete_id(individuals_raw)
         race_id = get_next_race_id(athlete_id, individuals_raw)
         new_row = {
@@ -641,4 +669,4 @@ if "diagnosis_row" in st.session_state:
 
 else:
     st.info("Enter a new race or load a saved one above to see your diagnostic report.")
-    
+
