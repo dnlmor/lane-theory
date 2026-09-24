@@ -3,7 +3,7 @@
 
 **[Live demo →]** *https://s-lanetheory.streamlit.app*
 
-Lane Theory analyzes elite 100m Freestyle performances to identify what
+Lane Theory analyzes elite performances to identify what
 technique and pacing patterns are associated with fast swimming, then
 gives any individual swimmer a personalized diagnostic — their strengths,
 their biggest opportunity, and a physically-grounded simulation of what's
@@ -18,7 +18,7 @@ range, never a leaderboard.
 1. **You enter a race** — lap-by-lap splits, breakout distances, stroke
    counts, reaction time.
 2. **The app compares you against an optimal-range benchmark** built from
-   20 male and 20 female fast 100m Freestyle performances, across 6
+   20 male and 20 female fast (for now I took the 100m Freestyle performances), across 6
    pillars: Pacing & Split Consistency, Underwater Hydrodynamics, Stroke
    Efficiency, Cadence Dynamics.
 3. **Every metric is classified on a 5-tier scale** — Excellent, Good,
@@ -181,11 +181,11 @@ streamlit run dashboard/app.py
 - [x] 6-Pillar individual diagnosis, 5-tier classification
 - [x] Physics-based gap simulation (avoiding RF extrapolation)
 - [x] Streamlit dashboard, deployed
-- [ ] Generalized dispatcher covering every metric (currently: breakout
+- [x] Generalized dispatcher covering every metric (currently: breakout
       decay, both underwater speeds)
 - [ ] 200m Freestyle extension (v1.1)
 
 ## Author
 
-Built by **Daniel Siahaan** ("Haaniel") — MSc AI for Marketing Strategy
-student, former competitive swimmer — as a portfolio project.
+Built by **Daniel Siahaan** — MSc AI for Marketing Strategy
+student, former competitive swimmer.
