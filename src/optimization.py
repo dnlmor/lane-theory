@@ -512,3 +512,73 @@ def print_report(report):
         for lv in report["already_optimal_levers"]:
             print(f"  {lv['feature']}: {lv['current']:.3f}  "
                   f"(elite range: {lv['elite_min']:.3f}-{lv['elite_max']:.3f}, mean {lv['elite_mean']:.3f})")
+
+
+# ---------- Technical Quality Score ----------
+# Decoupled from final_time_sec on purpose: this scores HOW a race was
+# executed (tier distribution across all 6 pillars), not how fast it was.
+# Two swims with the identical final_time_sec can — and often will —
+# score very differently here, since the same time can be reached through
+# clean technique or through compensating flaws elsewhere.
+
+TIER_GOODNESS = {"Excellent": 100, "Good": 75, "Medium": 50, "Bad": 25, "Critical": 0}
+
+
+def compute_pillar_shap_weights(gender, shap_values_dict, feature_cols, pillars=None):
+    """Normalized (sums to 1) importance weight per pillar, from the mean
+    |SHAP value| of that pillar's model-covered metrics, for this
+    gender's model. A pillar metric that isn't part of the trained
+    feature set (e.g. l1_breakout_pct/l2_breakout_pct — report-only,
+    never fed to the model) is skipped when computing the pillar's
+    weight, but the pillar itself still gets a weight from whichever of
+    its metrics ARE modeled. If a pillar has no modeled metrics at all
+    (shouldn't happen with the current PILLARS), falls back to equal
+    weighting across all pillars rather than a divide-by-zero."""
+    if pillars is None:
+        pillars = PILLARS
+    shap_vals = shap_values_dict[gender]
+    mean_abs_shap = pd.Series(np.abs(shap_vals).mean(axis=0), index=feature_cols)
+
+    raw_importance = {}
+    for pillar, metrics in pillars.items():
+        covered = [m for m in metrics if m in feature_cols]
+        raw_importance[pillar] = mean_abs_shap[covered].mean() if covered else 0.0
+
+    total = sum(raw_importance.values())
+    if total <= 0:
+        n = len(pillars)
+        return {p: 1.0 / n for p in pillars}
+    return {p: v / total for p, v in raw_importance.items()}
+
+
+def compute_technical_quality_score(tiered_pillar_report, gender, shap_values_dict, feature_cols, pillars=None):
+    """A 0-100 execution-quality score. Requires a pillar_report whose
+    entries already carry a 'tier' key (Excellent/Good/Medium/Bad/
+    Critical) — tiering itself lives with the caller (dashboard/
+    notebook), since it can layer extra refinement (e.g. Critical-Gap
+    severity splitting) on top of the base Strength/On-par/Gap verdict.
+
+    Each metric's tier maps to a goodness value (TIER_GOODNESS); a
+    pillar's score is the plain average goodness across its own metrics
+    (including report-only metrics with no individual SHAP weight); the
+    overall score is those pillar scores combined using SHAP-based
+    importance weights, so a weakness in a pillar the model leans on
+    heavily costs more than the same weakness in a pillar it barely
+    uses. Returns the overall score plus the per-pillar scores and
+    weights, so a caller can render the breakdown, not just the total.
+    """
+    if pillars is None:
+        pillars = PILLARS
+    weights = compute_pillar_shap_weights(gender, shap_values_dict, feature_cols, pillars)
+
+    pillar_scores = {}
+    for pillar, entries in tiered_pillar_report["pillars"].items():
+        goodness_vals = [TIER_GOODNESS[e["tier"]] for e in entries]
+        pillar_scores[pillar] = sum(goodness_vals) / len(goodness_vals)
+
+    overall = sum(weights[p] * pillar_scores[p] for p in pillar_scores)
+    return {
+        "overall_score": overall,
+        "pillar_scores": pillar_scores,
+        "pillar_weights": weights,
+    }
