@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from feature_engineering import engineer_features
 from optimization import (
     compute_pillar_report, simulate_primary_gap, get_direction, PILLARS,
+    compute_technical_quality_score, feature_cols,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -236,6 +237,23 @@ def refine_tier(internal_verdict, value, elite_min, elite_max, elite_mean, direc
         return "Good" if value <= midpoint else "Medium"
 
 
+def score_tier_label(score):
+    """Map a 0-100 Technical Quality Score onto the same five tier labels
+    (and therefore the same colors, via TIER_STYLE) used for individual
+    metrics — bands are centered on the TIER_GOODNESS values themselves
+    (100/75/50/25/0), so a score sitting exactly on a tier value falls
+    cleanly inside that tier's band rather than on an edge."""
+    if score >= 87.5:
+        return "Excellent"
+    if score >= 62.5:
+        return "Good"
+    if score >= 37.5:
+        return "Medium"
+    if score >= 12.5:
+        return "Bad"
+    return "Critical"
+
+
 def format_metric(entry, row, sub):
     m, v, mean = entry["metric"], entry["value"], entry["elite_mean"]
 
@@ -336,6 +354,10 @@ def inject_css():
 
 .calc-box {background: #0b1120; border: 1px dashed #334155; border-radius: 10px; padding: 10px 14px; margin-top: 4px; font-size: 13px; color: #94a3b8;}
 .calc-box b {color: #f8fafc;}
+
+.score-card {background: #111827; border-radius: 14px; padding: 16px 22px; margin-bottom: 18px; border: 1px solid #1f2937;}
+.score-num {font-size: 42px; font-weight: 800;}
+.score-sub {font-size: 12px; color: #64748b; margin-top: 6px; line-height: 1.5;}
 </style>
     """, unsafe_allow_html=True)
 
@@ -577,6 +599,31 @@ if "diagnosis_row" in st.session_state:
     def pillar_entries(*metrics):
         return [e for pname, entries in pillar_report["pillars"].items() for e in entries if e["metric"] in metrics]
 
+    quality = compute_technical_quality_score(pillar_report, gender, shap_values_dict, feature_cols)
+    score_label = score_tier_label(quality["overall_score"])
+    fg, _ = TIER_STYLE[score_label]
+
+    render_html(f'''
+    <div class="score-card">
+        <div class="hero-label">Technical Quality Score</div>
+        <div style="display:flex; align-items:baseline; gap:10px; margin-top:4px;">
+            <div class="score-num" style="color:{fg};">{quality['overall_score']:.0f}</div>
+            <div style="font-size:13px; color:#94a3b8;">/ 100{badge(score_label)}</div>
+        </div>
+        <div class="score-sub">
+            How cleanly this swim was executed, independent of final time — pillars are weighted by
+            how much each one actually drives race time in the {gender} model. Two swims at the same
+            final time can score very differently here.
+        </div>
+    </div>
+    ''')
+
+    with st.expander("See pillar breakdown & weights"):
+        for pillar in PILLARS:
+            w = quality["pillar_weights"][pillar]
+            s = quality["pillar_scores"][pillar]
+            st.markdown(f"**{pillar}** — model weight {w * 100:.0f}%, pillar score {s:.0f}/100")
+
     render_segment(1, "Pacing & Split Consistency",
                     pillar_entries("pacing_decay_ratio", "intra_lap1_fade_ratio", "intra_lap2_fade_ratio", "finish_vs_fresh_ratio"),
                     row, sub)
@@ -685,4 +732,3 @@ if "diagnosis_row" in st.session_state:
 
 else:
     st.info("Enter a new race or load a saved one above to see your diagnostic report.")
-
