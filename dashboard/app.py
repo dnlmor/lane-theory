@@ -23,7 +23,7 @@ import streamlit as st
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from feature_engineering import engineer_features
 from optimization import (
-    compute_pillar_report, simulate_primary_gap, get_direction, PILLARS,
+    compute_pillar_report, simulate_cumulative_gaps, get_direction, PILLARS,
     compute_technical_quality_score, feature_cols,
 )
 
@@ -683,26 +683,37 @@ if "diagnosis_row" in st.session_state:
     max_badness = max(pillar_badness.values()) if pillar_badness else 0
     biggest_gap_pillars = [p for p, s in pillar_badness.items() if s == max_badness] if max_badness > 0 else None
 
-    # ---------- Single-lever physics simulation (the flagged Gap only) ----------
-    sim, sim_reason = simulate_primary_gap(row, pillar_report, elite_features)
+    # ---------- Cumulative physics simulation (every flagged Gap, chained) ----------
+    sim, sim_note = simulate_cumulative_gaps(row, pillar_report, elite_features)
     if sim:
-        gap_label, _ = METRIC_INFO.get(sim["gap_metric"], (sim["gap_metric"], ""))
+        fixed_labels = [METRIC_INFO.get(m, (m, ""))[0] for m in sim["fixed_metrics"]]
         near = min(sim["simulated_time_conservative"], sim["simulated_time_typical"], sim["simulated_time_optimistic"])
         far = max(sim["simulated_time_conservative"], sim["simulated_time_typical"], sim["simulated_time_optimistic"])
-        extra_line = ""
-        if len(all_needs_work) > 1:
-            extra_line = (" This isolates a single lever — see the Priority Coaching Action "
-                          "Items below for everything else with room to improve.")
+
+        if len(fixed_labels) == 1:
+            fix_line = f"<b>{fixed_labels[0]}</b> moves"
+        else:
+            fix_line = f"<b>{', '.join(fixed_labels[:-1])}</b> and <b>{fixed_labels[-1]}</b> all move"
+
+        note_line = f" {sim_note}" if sim_note else ""
+
         render_html(f'''
         <div class="opportunity-card">
-            <div class="bottom-title">🎯 Single-Lever Opportunity: {gap_label}</div>
+            <div class="bottom-title">🎯 Time-Drop Opportunity</div>
             <div style="font-size:13.5px; color:#cbd5e1; line-height:1.6;">
-                Prediction if <b>only</b> this one factor moves to a realistic point within the optimal range,
+                Prediction if {fix_line} together to a realistic point within the optimal range,
                 with everything else held at your current, actual performance:
             </div>
             <div class="opportunity-range">{format_race_time(near)} – {format_race_time(far)}</div>
             <div style="font-size:11.5px; color:#64748b;">against your actual {format_race_time(sim['actual_time'])}.
-                A physics-based simulation of one isolated metric, not a full-body forecast.{extra_line}</div>
+                A physics-based simulation combining every flagged Gap that can be modeled.{note_line}</div>
+        </div>
+        ''')
+    elif sim_note:
+        render_html(f'''
+        <div class="opportunity-card">
+            <div class="bottom-title">🎯 Time-Drop Opportunity</div>
+            <div style="font-size:12.5px; color:#94a3b8;">{sim_note}</div>
         </div>
         ''')
 
