@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from feature_engineering import engineer_features
 from optimization import (
     compute_pillar_report, simulate_primary_gap, get_direction, PILLARS,
-    diagnose_swimmer, primitive_cols, feature_cols,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -172,6 +171,21 @@ def format_race_time(seconds):
     if m > 0:
         return f"{m:02d}:{s:05.2f}"
     return f"{s:.2f}s"
+
+
+def time_input(label, default, key, container=None):
+    """Plain-text decimal input for time fields, so the displayed value always
+    uses a period as the decimal separator — st.number_input renders a native
+    HTML number spinner, which some browser locales (e.g. fr-FR) display with
+    a comma even though the underlying float is period-based. Accepts a typed
+    comma too, so a stray '0,67' still parses correctly."""
+    box = container if container is not None else st
+    text = box.text_input(label, value=f"{default}", key=key)
+    try:
+        return float(text.strip().replace(",", "."))
+    except ValueError:
+        box.error(f"'{text}' isn't a valid number for {label} — using {default}.")
+        return default
 
 
 def parse_time_input(text):
@@ -409,13 +423,13 @@ with tab_new:
             dob = st.date_input("Date of birth", value=date(2005, 1, 1), key="in_dob")
         with col3:
             race_date_input = st.date_input("Race date", value=date.today(), key="in_race_date")
-            pb_50m_seconds = st.number_input("50m PB (s)", min_value=18.0, max_value=60.0, value=26.5, key="in_pb50")
+            pb_50m_seconds = time_input("50m PB (s)", 26.5, "in_pb50", container=col3)
 
     with st.container(border=True):
         st.markdown("**⏱️ Race Result**")
         col4a, col4b = st.columns(2)
         final_time_text = col4a.text_input("Final time (e.g. 57.53 or 1:02.43)", value="57.53", key="in_final_text")
-        l1_reaction_time = col4b.number_input("Reaction time (s)", min_value=0.3, max_value=1.5, value=0.67, key="in_rt")
+        l1_reaction_time = time_input("Reaction time (s)", 0.67, "in_rt", container=col4b)
         final_time_sec = parse_time_input(final_time_text)
         if final_time_sec is None:
             st.error("Enter a valid time, like 57.53 or 1:02.43.")
@@ -426,19 +440,19 @@ with tab_new:
         st.markdown("**1️⃣ Lap 1 (0–50m)**")
         c1, c2 = st.columns(2)
         l1_breakout_distance = c1.number_input("Breakout distance (m)", 0.0, 15.0, 12.0, key="l1bd")
-        l1_breakout_time = c2.number_input("Breakout time (s)", 0.5, 10.0, 4.6, key="l1bt")
+        l1_breakout_time = time_input("Breakout time (s)", 4.6, "l1bt", container=c2)
         c3, c4 = st.columns(2)
         l1_stroke_count = c3.number_input("Stroke count", 1, 60, 37, key="l1sc")
-        l1_total_time = c4.number_input("Lap 1 total time (s)", 10.0, 60.0, 27.81, key="l1tt")
-        l1_split_25m = st.number_input("Cumulative time @ 25m (s)", 8.0, 40.0, 12.3, key="l1s25")
+        l1_total_time = time_input("Lap 1 total time (s)", 27.81, "l1tt", container=c4)
+        l1_split_25m = time_input("Cumulative time @ 25m (s)", 12.3, "l1s25")
 
     with st.container(border=True):
         st.markdown("**2️⃣ Lap 2 (50–100m)**")
         c5, c6 = st.columns(2)
         l2_breakout_distance = c5.number_input("Breakout distance (m)", 0.0, 15.0, 6.5, key="l2bd")
-        l2_breakout_time = c6.number_input("Breakout time (s)", 0.5, 10.0, 2.7, key="l2bt")
+        l2_breakout_time = time_input("Breakout time (s)", 2.7, "l2bt", container=c6)
         l2_stroke_count = st.number_input("Stroke count", 1, 60, 45, key="l2sc")
-        l2_split_25m = st.number_input("Time @ 75m mark (lap-relative, s)", 8.0, 40.0, 14.2, key="l2s25")
+        l2_split_25m = time_input("Time @ 75m mark (lap-relative, s)", 14.2, "l2s25")
 
         if final_time_sec is None:
             l2_total_time = None
@@ -630,8 +644,8 @@ if "diagnosis_row" in st.session_state:
         far = max(sim["simulated_time_conservative"], sim["simulated_time_typical"], sim["simulated_time_optimistic"])
         extra_line = ""
         if len(all_needs_work) > 1:
-            extra_line = (" This isolates a single lever — see \u201cWhat It Would Actually Take\u201d "
-                          "below for the combined picture across everything flagged.")
+            extra_line = (" This isolates a single lever — see the Priority Coaching Action "
+                          "Items below for everything else with room to improve.")
         render_html(f'''
         <div class="opportunity-card">
             <div class="bottom-title">🎯 Single-Lever Opportunity: {gap_label}</div>
@@ -642,54 +656,6 @@ if "diagnosis_row" in st.session_state:
             <div class="opportunity-range">{format_race_time(near)} – {format_race_time(far)}</div>
             <div style="font-size:11.5px; color:#64748b;">against your actual {format_race_time(sim['actual_time'])}.
                 A physics-based simulation of one isolated metric, not a full-body forecast.{extra_line}</div>
-        </div>
-        ''')
-
-    # ---------- Compound multi-lever simulation (everything flagged, together) ----------
-    # Uses the SHAP-prioritized levers + the trained model's own constrained
-    # optimizer (diagnose_swimmer), so this reflects moving every lever with
-    # real room to improve AT THE SAME TIME — not one metric in isolation.
-    diagnosis = diagnose_swimmer(row, elite_features, models, shap_values_dict, primitive_cols, feature_cols)
-    n_movable = len(diagnosis["levers"])
-
-    if n_movable >= 1:
-        lever_rows = "".join(
-            f'<div class="action-item">{lv["feature"].replace("_", " ").title()}: '
-            f'{lv["current"]:.3f} \u2192 {lv["simulated"]:.3f} '
-            f'(elite {lv["elite_min"]:.3f}\u2013{lv["elite_max"]:.3f}, mean {lv["elite_mean"]:.3f})</div>'
-            for lv in diagnosis["levers"]
-        )
-        extrap_note = ""
-        if diagnosis["is_extrapolated"]:
-            extrap_note = (
-                '<div style="font-size:11px; color:#94a3b8; margin-top:8px;">'
-                "Some of your underlying metrics sit outside the elite dataset's range, so the model "
-                "can't reliably forecast an absolute combined time here — treat the direction and the "
-                "lever list as the signal, and lean on the 6-Pillar breakdown above for the reliable read."
-                "</div>"
-            )
-        render_html(f'''
-        <div class="bottom-card" style="margin-top:14px;">
-            <div class="bottom-title">🧩 What It Would Actually Take</div>
-            <div style="font-size:12.5px; color:#94a3b8; margin-bottom:8px;">
-                Moving every lever below <b>together</b> is what it would take to approach a combined
-                predicted time of <b>{format_race_time(diagnosis['simulated_predicted_time'])}</b>
-                (currently predicted at {format_race_time(diagnosis['current_predicted_time'])}).
-                One lever alone, like the single-lever card above, gets you a fraction of this.
-            </div>
-            {lever_rows}
-            {extrap_note}
-        </div>
-        ''')
-    else:
-        render_html('''
-        <div class="bottom-card" style="margin-top:14px;">
-            <div class="bottom-title">🧩 What It Would Actually Take</div>
-            <div style="font-size:12.5px; color:#94a3b8;">
-                No lever has meaningful room left to improve in the beneficial direction —
-                there isn't a large combined gain sitting on the table beyond what's already
-                reflected above.
-            </div>
         </div>
         ''')
 
@@ -719,4 +685,4 @@ if "diagnosis_row" in st.session_state:
 
 else:
     st.info("Enter a new race or load a saved one above to see your diagnostic report.")
-    
+
