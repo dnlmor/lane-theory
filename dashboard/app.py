@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from feature_engineering import engineer_features
 from optimization import (
     compute_pillar_report, simulate_primary_gap, get_direction, PILLARS,
+    diagnose_swimmer, primitive_cols, feature_cols,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -621,24 +622,74 @@ if "diagnosis_row" in st.session_state:
     max_badness = max(pillar_badness.values()) if pillar_badness else 0
     biggest_gap_pillars = [p for p, s in pillar_badness.items() if s == max_badness] if max_badness > 0 else None
 
+    # ---------- Single-lever physics simulation (the flagged Gap only) ----------
     sim, sim_reason = simulate_primary_gap(row, pillar_report, elite_features)
     if sim:
         gap_label, _ = METRIC_INFO.get(sim["gap_metric"], (sim["gap_metric"], ""))
-        near = min(sim["simulated_time_conservative"], sim["simulated_time_typical"])
-        far = max(sim["simulated_time_conservative"], sim["simulated_time_typical"])
+        near = min(sim["simulated_time_conservative"], sim["simulated_time_typical"], sim["simulated_time_optimistic"])
+        far = max(sim["simulated_time_conservative"], sim["simulated_time_typical"], sim["simulated_time_optimistic"])
         extra_line = ""
         if len(all_needs_work) > 1:
-            extra_line = (" This reflects fixing only that one factor — see Priority Coaching Action "
-                          "Items below for everything else with room to improve.")
+            extra_line = (" This isolates a single lever — see \u201cWhat It Would Actually Take\u201d "
+                          "below for the combined picture across everything flagged.")
         render_html(f'''
         <div class="opportunity-card">
-            <div class="bottom-title">🎯 Primary Time-Drop Opportunity</div>
+            <div class="bottom-title">🎯 Single-Lever Opportunity: {gap_label}</div>
             <div style="font-size:13.5px; color:#cbd5e1; line-height:1.6;">
-                Prediction given if swimmer fixes their gap to a realistic point within the optimal range:
+                Prediction if <b>only</b> this one factor moves to a realistic point within the optimal range,
+                with everything else held at your current, actual performance:
             </div>
             <div class="opportunity-range">{format_race_time(near)} – {format_race_time(far)}</div>
             <div style="font-size:11.5px; color:#64748b;">against your actual {format_race_time(sim['actual_time'])}.
-                A physics-based simulation, not a guarantee.{extra_line}</div>
+                A physics-based simulation of one isolated metric, not a full-body forecast.{extra_line}</div>
+        </div>
+        ''')
+
+    # ---------- Compound multi-lever simulation (everything flagged, together) ----------
+    # Uses the SHAP-prioritized levers + the trained model's own constrained
+    # optimizer (diagnose_swimmer), so this reflects moving every lever with
+    # real room to improve AT THE SAME TIME — not one metric in isolation.
+    diagnosis = diagnose_swimmer(row, elite_features, models, shap_values_dict, primitive_cols, feature_cols)
+    n_movable = len(diagnosis["levers"])
+
+    if n_movable >= 1:
+        lever_rows = "".join(
+            f'<div class="action-item">{lv["feature"].replace("_", " ").title()}: '
+            f'{lv["current"]:.3f} \u2192 {lv["simulated"]:.3f} '
+            f'(elite {lv["elite_min"]:.3f}\u2013{lv["elite_max"]:.3f}, mean {lv["elite_mean"]:.3f})</div>'
+            for lv in diagnosis["levers"]
+        )
+        extrap_note = ""
+        if diagnosis["is_extrapolated"]:
+            extrap_note = (
+                '<div style="font-size:11px; color:#94a3b8; margin-top:8px;">'
+                "Some of your underlying metrics sit outside the elite dataset's range, so the model "
+                "can't reliably forecast an absolute combined time here — treat the direction and the "
+                "lever list as the signal, and lean on the 6-Pillar breakdown above for the reliable read."
+                "</div>"
+            )
+        render_html(f'''
+        <div class="bottom-card" style="margin-top:14px;">
+            <div class="bottom-title">🧩 What It Would Actually Take</div>
+            <div style="font-size:12.5px; color:#94a3b8; margin-bottom:8px;">
+                Moving every lever below <b>together</b> is what it would take to approach a combined
+                predicted time of <b>{format_race_time(diagnosis['simulated_predicted_time'])}</b>
+                (currently predicted at {format_race_time(diagnosis['current_predicted_time'])}).
+                One lever alone, like the single-lever card above, gets you a fraction of this.
+            </div>
+            {lever_rows}
+            {extrap_note}
+        </div>
+        ''')
+    else:
+        render_html('''
+        <div class="bottom-card" style="margin-top:14px;">
+            <div class="bottom-title">🧩 What It Would Actually Take</div>
+            <div style="font-size:12.5px; color:#94a3b8;">
+                No lever has meaningful room left to improve in the beneficial direction —
+                there isn't a large combined gain sitting on the table beyond what's already
+                reflected above.
+            </div>
         </div>
         ''')
 
@@ -668,4 +719,4 @@ if "diagnosis_row" in st.session_state:
 
 else:
     st.info("Enter a new race or load a saved one above to see your diagnostic report.")
-
+    
