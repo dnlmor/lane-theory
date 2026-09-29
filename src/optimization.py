@@ -366,7 +366,10 @@ def simulate_primary_gap(row, pillar_report, elite_df):
     within those, picks the first Gap metric that has a registered
     simulator. If no flagged Gap metric has a simulator built yet, returns
     None with an explanatory reason rather than silently doing nothing or
-    guessing."""
+    guessing.
+
+    NOTE: this fixes only ONE metric in isolation. For the combined effect
+    of fixing every flagged Gap together, see simulate_cumulative_gaps."""
     biggest_gap_pillars = find_biggest_gap_pillar(pillar_report)
     if not biggest_gap_pillars:
         return None, "No Gap metrics found — this swimmer is at or above the elite range on every measured dimension."
@@ -385,6 +388,125 @@ def simulate_primary_gap(row, pillar_report, elite_df):
     return None, (f"Gap(s) found in {candidate_metrics}, but no physics-based simulator "
                    f"is built for these yet — see the 6-Pillar report for the diagnosis, "
                    f"and src/optimization.py's SIMULATOR_DISPATCH to add one.")
+
+
+# Fixed application order for simulate_cumulative_gaps — each entry touches
+# a specific piece of race-state, built on whatever the previous entries in
+# the chain already changed (rather than each computed independently off
+# the swimmer's raw actual values, which would silently ignore how the
+# fixes interact). l1_underwater_speed only ever touches Lap 1, so it's
+# order-independent; l2_underwater_speed and breakout_decay_ratio both
+# touch Lap 2, and breakout_decay_ratio's underwater-time term uses
+# whatever l2_underwater_speed currently is in the chain — so if BOTH are
+# flagged, this reflects extending the (already sped-up) underwater phase
+# by MORE distance, not extending the original slower phase.
+# Extending this to a metric outside {l1_underwater_speed,
+# l2_underwater_speed, breakout_decay_ratio} requires writing its own state
+# transition here, not just adding it to SIMULATOR_DISPATCH.
+_CUMULATIVE_GAP_ORDER = ["l1_underwater_speed", "l2_underwater_speed", "breakout_decay_ratio"]
+
+
+def simulate_cumulative_gaps(row, pillar_report, elite_df):
+    """Compound version of simulate_primary_gap: instead of fixing ONE
+    flagged Gap metric in isolation, applies EVERY flagged Gap metric that
+    has a registered physics-based simulator, chained together so each
+    fix builds on the race-state left by the previous one. Flagged Gaps
+    with no simulator yet are reported separately (never silently
+    dropped), so the caller can tell "not much else to fix" apart from
+    "more exists but isn't modeled yet."
+
+    Scans every pillar for Gap verdicts (not just the single worst
+    pillar, unlike simulate_primary_gap) — the point here is the whole
+    swimmer, not one weak area.
+
+    Returns (sim, note):
+      - sim is None if no flagged Gap has a simulator; sim otherwise
+        holds actual_time, fixed_metrics (what was simulated), and a
+        conservative/typical/optimistic combined time range.
+      - note is None if every flagged Gap got simulated; otherwise a
+        string listing which flagged Gap(s) were left out because no
+        simulator exists for them yet.
+    """
+    gender = row["gender"]
+    sub = elite_df[elite_df["gender"] == gender]
+
+    all_gap_metrics = [
+        e["metric"]
+        for entries in pillar_report["pillars"].values()
+        for e in entries
+        if e["verdict"] == "Gap"
+    ]
+    fixed_metrics = [m for m in _CUMULATIVE_GAP_ORDER if m in all_gap_metrics]
+    unsimulated = [m for m in all_gap_metrics if m not in SIMULATOR_DISPATCH]
+
+    if not fixed_metrics:
+        reason = "No Gap metrics found — this swimmer is at or above the elite range on every measured dimension."
+        if unsimulated:
+            reason = (f"Gap(s) found in {unsimulated}, but no physics-based simulator "
+                       f"is built for these yet.")
+        return None, reason
+
+    results = {}
+    for label in ("conservative", "typical", "optimistic"):
+        state = {
+            "l1_breakout_distance": row["l1_breakout_distance"],
+            "l1_surface_time": row["l1_total_time"] - row["l1_breakout_time"],
+            "l1_total_time": row["l1_total_time"],
+            "l2_breakout_distance": row["l2_breakout_distance"],
+            "l2_surface_time": row["l2_total_time"] - row["l2_breakout_time"],
+            "l2_underwater_speed": row["l2_underwater_speed"],
+            "l2_surface_speed": row["l2_surface_speed"],
+            "l2_total_time": row["l2_total_time"],
+        }
+
+        if "l1_underwater_speed" in fixed_metrics:
+            elite_min, elite_mean, elite_max = (sub["l1_underwater_speed"].min(),
+                                                 sub["l1_underwater_speed"].mean(),
+                                                 sub["l1_underwater_speed"].max())
+            target = {"conservative": elite_min, "typical": elite_mean, "optimistic": elite_max}[label]
+            breakout_time = state["l1_breakout_distance"] / target
+            state["l1_total_time"] = breakout_time + state["l1_surface_time"]
+
+        if "l2_underwater_speed" in fixed_metrics:
+            elite_min, elite_mean, elite_max = (sub["l2_underwater_speed"].min(),
+                                                 sub["l2_underwater_speed"].mean(),
+                                                 sub["l2_underwater_speed"].max())
+            target = {"conservative": elite_min, "typical": elite_mean, "optimistic": elite_max}[label]
+            breakout_time = state["l2_breakout_distance"] / target
+            state["l2_underwater_speed"] = target
+            state["l2_total_time"] = breakout_time + state["l2_surface_time"]
+
+        if "breakout_decay_ratio" in fixed_metrics:
+            elite_min, elite_mean, elite_max = (sub["breakout_decay_ratio"].min(),
+                                                 sub["breakout_decay_ratio"].mean(),
+                                                 sub["breakout_decay_ratio"].max())
+            target = {"conservative": elite_min, "typical": elite_mean, "optimistic": elite_max}[label]
+            sim_breakout = state["l1_breakout_distance"] * target
+            sim_surface_dist = 50.0 - sim_breakout
+            underwater_time = sim_breakout / state["l2_underwater_speed"]
+            surface_time = sim_surface_dist / state["l2_surface_speed"]
+            state["l2_breakout_distance"] = sim_breakout
+            state["l2_surface_time"] = surface_time
+            state["l2_total_time"] = underwater_time + surface_time
+
+        results[label] = state["l1_total_time"] + state["l2_total_time"]
+
+    note = None
+    if unsimulated:
+        note = (f"Gap(s) also found in {unsimulated}, but no physics-based simulator exists "
+                 f"for these yet, so they're not reflected in this combined estimate.")
+
+    sim = {
+        "name": row["name"],
+        "gender": gender,
+        "actual_time": row["final_time_sec"],
+        "fixed_metrics": fixed_metrics,
+        "unsimulated_metrics": unsimulated,
+        "simulated_time_conservative": results["conservative"],
+        "simulated_time_typical": results["typical"],
+        "simulated_time_optimistic": results["optimistic"],
+    }
+    return sim, note
 
 
 def check_extrapolation(row, elite_df, primitive_cols, min_features_outside=1):
